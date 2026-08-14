@@ -26,7 +26,9 @@ SECRET_KEY = 'django-insecure-(0gx2-(6j@9i#8o*4_=_@t(5)r#_l%y2vw0mu8(g7^_p*g3zng
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["ssjf8l6v-8000.inc1.devtunnels.ms",
+    "localhost",
+    "127.0.0.1",]
 
 
 # Application definition
@@ -39,10 +41,13 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'accounts',
+    "corsheaders",
+    'rest_framework',
     "rest_framework_simplejwt.token_blacklist",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -50,6 +55,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+CORS_ALLOWED_ORIGINS = [
+   "http://localhost:5173",
 ]
 
 ROOT_URLCONF = 'employee_evaluation_system.urls'
