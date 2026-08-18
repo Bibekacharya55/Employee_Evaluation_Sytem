@@ -1,272 +1,254 @@
-# """
-# Integration tests for evaluations API endpoints.
-# Run with: python manage.py test evaluations.tests
-# """
-# from datetime import date
+from datetime import date
 
-# from django.contrib.auth import get_user_model
-# from rest_framework import status
-# from rest_framework.test import APITestCase
-# from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
-# from evaluations.models import Answer, Evaluation, EvaluationCycle, PeerAssignment
-# from questions.models import Category, Question
+from evaluations.models import Answer, Evaluation, EvaluationCycle, PeerAssignment
+from questions.models import Category, Question
 
-# User = get_user_model()
+User = get_user_model()
 
 
-# class EvaluationsAPITestCase(APITestCase):
-#     def setUp(self):
-#         self.evaluator = User.objects.create_user(
-#             username="evaluator",
-#             email="evaluator@example.com",
-#             password="pass12345",
-#             first_name="Eval",
-#             last_name="Uator",
-#             role="Engineer",
-#         )
-#         self.evaluatee = User.objects.create_user(
-#             username="evaluatee",
-#             email="evaluatee@example.com",
-#             password="pass12345",
-#             first_name="Thermo",
-#             last_name="Flask",
-#             role="Frontend Dev",
-#         )
-#         self.other = User.objects.create_user(
-#             username="other",
-#             email="other@example.com",
-#             password="pass12345",
-#             first_name="Other",
-#             last_name="Person",
-#             role="Backend Dev",
-#         )
+class EvaluationsAPITestCase(APITestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(
+            username="usera",
+            email="usera@example.com",
+            password="pass12345",
+            first_name="User",
+            last_name="A",
+        )
+        self.user_b = User.objects.create_user(
+            username="userb",
+            email="userb@example.com",
+            password="pass12345",
+            first_name="User",
+            last_name="B",
+        )
 
-#         self.cycle = EvaluationCycle.objects.create(
-#             name="Q3 2026",
-#             status=EvaluationCycle.STATUS_OPEN,
-#             start_date=date(2026, 7, 1),
-#             end_date=date(2026, 9, 30),
-#         )
+        self.cycle = EvaluationCycle.objects.create(
+            name="Q3 2026",
+            status=EvaluationCycle.STATUS_OPEN,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 9, 30),
+        )
 
-#         self.category = Category.objects.create(name="Technical Skills", order=1)
-#         self.question1 = Question.objects.create(
-#             category=self.category,
-#             text="Question 1",
-#             order=1,
-#         )
-#         self.question2 = Question.objects.create(
-#             category=self.category,
-#             text="Question 2",
-#             order=2,
-#         )
+        self.category = Category.objects.create(name="Technical Skills", order=1)
+        self.question1 = Question.objects.create(
+            category=self.category,
+            text="Question 1 text",
+            order=1,
+        )
+        self.question2 = Question.objects.create(
+            category=self.category,
+            text="Question 2 text",
+            order=2,
+        )
 
-#         self.authenticate(self.evaluator)
+        self.authenticate(self.user_a)
 
-#     def authenticate(self, user):
-#         token = RefreshToken.for_user(user).access_token
-#         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    def authenticate(self, user):
+        token = RefreshToken.for_user(user).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
-#     def test_list_evaluation_cycles_with_status_filter(self):
-#         EvaluationCycle.objects.create(
-#             name="Q2 2026",
-#             status=EvaluationCycle.STATUS_CLOSED,
-#             start_date=date(2026, 4, 1),
-#             end_date=date(2026, 6, 30),
-#         )
+    def test_submitted_evaluation_rejects_further_patch_attempts(self):
+        """TEST 1 — Submitted evaluation rejects further PATCH/write attempts"""
+        evaluation = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_a,
+            evaluation_type=Evaluation.TYPE_SELF,
+            status=Evaluation.STATUS_DRAFT,
+        )
 
-#         response = self.client.get("/api/evaluation-cycles/?status=open")
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertEqual(len(response.data), 1)
-#         self.assertEqual(response.data[0]["name"], "Q3 2026")
-#         self.assertEqual(response.data[0]["status"], "open")
+        # Add initial answer
+        Answer.objects.create(
+            evaluation=evaluation,
+            question=self.question1,
+            score=3,
+            justification="Initial justification",
+        )
+        Answer.objects.create(
+            evaluation=evaluation,
+            question=self.question2,
+            score=3,
+            justification="Initial justification",
+        )
 
-#     def test_available_employees(self):
-#         response = self.client.get(
-#             f"/api/peer-assignments/available-employees/?cycle_id={self.cycle.id}&search=Thermo"
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertEqual(len(response.data), 1)
-#         self.assertEqual(response.data[0]["first_name"], "Thermo")
-#         self.assertEqual(response.data[0]["role"], "Frontend Dev")
-#         self.assertEqual(response.data[0]["availability"], "available")
+        # Submit evaluation
+        submit_res = self.client.post(f"/evaluations/{evaluation.id}/submit/")
+        self.assertEqual(submit_res.status_code, status.HTTP_200_OK)
+        evaluation.refresh_from_db()
+        self.assertIn(evaluation.status, (Evaluation.STATUS_SUBMITTED, Evaluation.STATUS_LOCKED))
 
-#     def test_create_peer_assignment(self):
-#         response = self.client.post(
-#             "/api/peer-assignments/",
-#             {"cycle_id": self.cycle.id, "evaluatee_id": self.evaluatee.id},
-#             format="json",
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-#         self.assertEqual(response.data["evaluator_id"], self.evaluator.id)
-#         self.assertEqual(response.data["evaluatee_id"], self.evaluatee.id)
-#         self.assertEqual(response.data["status"], "pending")
+        # Attempt PATCH to direct evaluation endpoint
+        patch_res1 = self.client.patch(
+            f"/evaluations/{evaluation.id}/",
+            {
+                "answers": [
+                    {
+                        "question_id": self.question1.id,
+                        "score": 4,
+                        "justification": "Attempted update",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertIn(patch_res1.status_code, (status.HTTP_423_LOCKED, status.HTTP_400_BAD_REQUEST))
 
-#     def test_create_evaluation(self):
-#         peer_assignment = PeerAssignment.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#         )
+        # Attempt PATCH to answers endpoint
+        patch_res2 = self.client.patch(
+            f"/evaluations/{evaluation.id}/answers/",
+            {
+                "answers": [
+                    {
+                        "question_id": self.question1.id,
+                        "score": 4,
+                        "justification": "Attempted update",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertIn(patch_res2.status_code, (status.HTTP_423_LOCKED, status.HTTP_400_BAD_REQUEST))
 
-#         response = self.client.post(
-#             "/api/evaluations/",
-#             {
-#                 "cycle_id": self.cycle.id,
-#                 "evaluation_type": "peer",
-#                 "peer_assignment_id": peer_assignment.id,
-#             },
-#             format="json",
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-#         self.assertEqual(response.data["status"], "draft")
-#         self.assertEqual(response.data["peer_assignment_id"], peer_assignment.id)
+        # Assert evaluation answers remain unchanged
+        ans1 = Answer.objects.get(evaluation=evaluation, question=self.question1)
+        self.assertEqual(ans1.score, 3)
+        self.assertEqual(ans1.justification, "Initial justification")
 
-#     def test_get_evaluation_detail(self):
-#         peer_assignment = PeerAssignment.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#         )
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             peer_assignment=peer_assignment,
-#             evaluation_type=Evaluation.TYPE_PEER,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
+    def test_score_5_without_justification_rejected_on_submit(self):
+        """TEST 2 — Score = 5 without justification is rejected on submit"""
+        evaluation = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_a,
+            evaluation_type=Evaluation.TYPE_SELF,
+            status=Evaluation.STATUS_DRAFT,
+        )
 
-#         response = self.client.get(f"/api/evaluations/{evaluation.id}/")
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertIn("categories", response.data)
-#         self.assertEqual(len(response.data["categories"]), 1)
+        Answer.objects.create(
+            evaluation=evaluation,
+            question=self.question1,
+            score=5,
+            justification=None,  # Missing justification for score 5
+        )
+        Answer.objects.create(
+            evaluation=evaluation,
+            question=self.question2,
+            score=3,
+            justification="Normal score",
+        )
 
-#     def test_save_draft_answers(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
+        # Attempt submit
+        submit_res = self.client.post(f"/evaluations/{evaluation.id}/submit/")
+        self.assertEqual(submit_res.status_code, status.HTTP_400_BAD_REQUEST)
 
-#         response = self.client.patch(
-#             f"/api/evaluations/{evaluation.id}/answers/",
-#             {
-#                 "answers": [
-#                     {"question_id": self.question1.id, "score": 1, "justification": None},
-#                     {
-#                         "question_id": self.question2.id,
-#                         "score": 5,
-#                         "justification": "Found and fixed the root cause.",
-#                     },
-#                 ]
-#             },
-#             format="json",
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertEqual(Answer.objects.filter(evaluation=evaluation).count(), 2)
+        # Assert evaluation remains a draft
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.status, Evaluation.STATUS_DRAFT)
 
-#     def test_get_answer_detail(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
-#         answer = Answer.objects.create(
-#             evaluation=evaluation,
-#             question=self.question2,
-#             score=5,
-#             justification="Found and fixed the root cause.",
-#         )
+    def test_diff_2_rule_rejected_when_justification_missing(self):
+        """TEST 3 — Diff-2 rule rejected on submit when required justification is missing"""
+        # Create self evaluation for User B with score 1
+        self_eval = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_b,
+            evaluatee=self.user_b,
+            evaluation_type=Evaluation.TYPE_SELF,
+            status=Evaluation.STATUS_SUBMITTED,
+        )
+        Answer.objects.create(
+            evaluation=self_eval,
+            question=self.question1,
+            score=1,
+            justification="Self score 1",
+        )
+        Answer.objects.create(
+            evaluation=self_eval,
+            question=self.question2,
+            score=1,
+            justification="Self score 1",
+        )
 
-#         response = self.client.get(f"/api/answers/{answer.id}/")
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertEqual(response.data["score"], 5)
+        # Create peer evaluation by User A for User B with peer score 4 (|4 - 1| = 3 >= 2)
+        peer_assignment = PeerAssignment.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_b,
+        )
+        peer_eval = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_b,
+            peer_assignment=peer_assignment,
+            evaluation_type=Evaluation.TYPE_PEER,
+            status=Evaluation.STATUS_DRAFT,
+        )
 
-#     def test_submit_evaluation_success(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
-#         Answer.objects.create(
-#             evaluation=evaluation,
-#             question=self.question1,
-#             score=1,
-#             justification=None,
-#         )
-#         Answer.objects.create(
-#             evaluation=evaluation,
-#             question=self.question2,
-#             score=5,
-#             justification="Found and fixed the root cause.",
-#         )
+        # Peer answer has score=4 (diff=3 >= 2) but NO justification
+        peer_ans1 = Answer.objects.create(
+            evaluation=peer_eval,
+            question=self.question1,
+            score=4,
+            justification="",  # Missing justification for Diff-2
+        )
+        Answer.objects.create(
+            evaluation=peer_eval,
+            question=self.question2,
+            score=1,
+            justification="No diff",
+        )
 
-#         response = self.client.post(f"/api/evaluations/{evaluation.id}/submit/")
-#         self.assertEqual(response.status_code, status.HTTP_200_OK)
-#         self.assertEqual(response.data["status"], "locked")
-#         self.assertIsNotNone(response.data["submitted_at"])
+        # Attempt submit peer evaluation -> must be rejected because justification missing for diff >= 2
+        submit_res = self.client.post(f"/evaluations/{peer_eval.id}/submit/")
+        self.assertEqual(submit_res.status_code, status.HTTP_400_BAD_REQUEST)
+        peer_eval.refresh_from_db()
+        self.assertEqual(peer_eval.status, Evaluation.STATUS_DRAFT)
 
-#     def test_submit_evaluation_missing_justification_for_score_5(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
-#         Answer.objects.create(
-#             evaluation=evaluation,
-#             question=self.question1,
-#             score=1,
-#             justification=None,
-#         )
-#         Answer.objects.create(
-#             evaluation=evaluation,
-#             question=self.question2,
-#             score=5,
-#             justification=None,
-#         )
+        # Now provide the required justification and attempt submit again -> should succeed and set status to diff-review
+        peer_ans1.justification = "Detailed justification for high score difference"
+        peer_ans1.save()
 
-#         response = self.client.post(f"/api/evaluations/{evaluation.id}/submit/")
-#         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-#         self.assertEqual(response.data["detail"], "This evaluation cannot be submitted yet.")
-#         self.assertIn(f"question_{self.question2.id}", response.data["errors"])
+        submit_res2 = self.client.post(f"/evaluations/{peer_eval.id}/submit/")
+        self.assertEqual(submit_res2.status_code, status.HTTP_200_OK)
+        peer_eval.refresh_from_db()
+        self.assertEqual(peer_eval.status, Evaluation.STATUS_DIFF_REVIEW)
 
-#     def test_save_answers_locked_evaluation_returns_423(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_LOCKED,
-#         )
+    def test_draft_save_allowed_when_incomplete(self):
+        """TEST 4 — Draft save is allowed even when answers are incomplete"""
+        evaluation = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_a,
+            evaluation_type=Evaluation.TYPE_SELF,
+            status=Evaluation.STATUS_DRAFT,
+        )
 
-#         response = self.client.patch(
-#             f"/api/evaluations/{evaluation.id}/answers/",
-#             {"answers": [{"question_id": self.question1.id, "score": 1, "justification": None}]},
-#             format="json",
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_423_LOCKED)
+        # Save an incomplete draft: score = 5 with NO justification, and question 2 not answered at all
+        patch_res = self.client.patch(
+            f"/evaluations/{evaluation.id}/answers/",
+            {
+                "answers": [
+                    {
+                        "question_id": self.question1.id,
+                        "score": 5,
+                        "justification": None,
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(patch_res.status_code, status.HTTP_200_OK)
 
-#     def test_invalid_score_rejected_on_draft_save(self):
-#         evaluation = Evaluation.objects.create(
-#             cycle=self.cycle,
-#             evaluator=self.evaluator,
-#             evaluatee=self.evaluatee,
-#             evaluation_type=Evaluation.TYPE_SELF,
-#             status=Evaluation.STATUS_DRAFT,
-#         )
+        # Assert evaluation remains editable / draft
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.status, Evaluation.STATUS_DRAFT)
 
-#         response = self.client.patch(
-#             f"/api/evaluations/{evaluation.id}/answers/",
-#             {"answers": [{"question_id": self.question1.id, "score": 0, "justification": None}]},
-#             format="json",
-#         )
-#         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # Confirm answer score 5 saved with justification None
+        ans1 = Answer.objects.get(evaluation=evaluation, question=self.question1)
+        self.assertEqual(ans1.score, 5)
+        self.assertIsNone(ans1.justification)

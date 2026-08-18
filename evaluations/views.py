@@ -116,15 +116,36 @@ class EvaluationCreateView(APIView):
         )
 
 
+class EvaluationMineView(ListAPIView):
+    serializer_class = EvaluationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Evaluation.objects.filter(
+            evaluator=self.request.user
+        ).select_related(
+            "cycle", "evaluator", "evaluatee", "peer_assignment"
+        ).prefetch_related("answers")
+
+
 class EvaluationDetailView(RetrieveAPIView):
     serializer_class = EvaluationDetailSerializer
     permission_classes = [IsAuthenticated]
-    queryset = Evaluation.objects.select_related(
-        "cycle",
-        "evaluator",
-        "evaluatee",
-        "peer_assignment",
-    ).prefetch_related("answers__question")
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Evaluation.objects.select_related(
+            "cycle",
+            "evaluator",
+            "evaluatee",
+            "peer_assignment",
+        ).prefetch_related("answers__question")
+        if user.is_staff:
+            return qs
+        return qs.filter(Q(evaluator=user) | Q(evaluatee=user))
+
+    def patch(self, request, pk):
+        return SaveAnswersView().patch(request, pk)
 
 
 class SaveAnswersView(APIView):
@@ -135,6 +156,12 @@ class SaveAnswersView(APIView):
             evaluation = Evaluation.objects.get(pk=pk)
         except Evaluation.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if evaluation.evaluator != request.user and not request.user.is_staff:
+            return Response(
+                {"detail": "You do not have permission to edit this evaluation."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if evaluation.status != Evaluation.STATUS_DRAFT:
             return Response(
@@ -165,7 +192,7 @@ class SaveAnswersView(APIView):
         evaluation.status = Evaluation.STATUS_DRAFT
         evaluation.save(update_fields=["status", "updated_at"])
 
-        return Response(EvaluationDetailSerializer(evaluation).data)
+        return Response(EvaluationSerializer(evaluation).data)
 
 
 class AnswerDetailView(RetrieveAPIView):
@@ -183,40 +210,77 @@ class SubmitEvaluationView(APIView):
         except Evaluation.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if evaluation.status != Evaluation.STATUS_DRAFT:
+        if evaluation.evaluator != request.user and not request.user.is_staff:
+            return Response(
+                {"detail": "You do not have permission to submit this evaluation."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if evaluation.status not in (Evaluation.STATUS_DRAFT, Evaluation.STATUS_NOT_STARTED):
             return Response(
                 {"detail": "This evaluation has already been submitted."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         answers_by_question = {
-            answer.question_id: answer for answer in evaluation.answers.all()
+            ans.question_id: ans for ans in evaluation.answers.all()
         }
         all_questions = Question.objects.all()
-        errors = {}
 
+        # 1. Required questions check
         for question in all_questions:
-            answer = answers_by_question.get(question.id)
-            field_name = f"question_{question.id}"
+            ans = answers_by_question.get(question.id)
+            if ans is None or ans.score is None:
+                return Response(
+                    {"detail": f"Question {question.id} must be answered before submission."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            if answer is None:
-                errors[field_name] = ["This question must be answered before submission."]
-                continue
+        # 2. Score = 5 justification check
+        for ans in evaluation.answers.all():
+            if ans.score == 5 and (not ans.justification or not ans.justification.strip()):
+                return Response(
+                    {"detail": f"Question {ans.question_id} has a score of 5 and requires a written justification."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            if answer.score == 5 and not (answer.justification and answer.justification.strip()):
-                errors[field_name] = ["Score of 5 requires a written justification."]
+        # 3. Diff-2 rule check
+        comp_eval = None
+        if evaluation.evaluation_type == Evaluation.TYPE_PEER:
+            comp_eval = Evaluation.objects.filter(
+                cycle=evaluation.cycle,
+                evaluatee=evaluation.evaluatee,
+                evaluation_type=Evaluation.TYPE_SELF,
+            ).first()
+        elif evaluation.evaluation_type == Evaluation.TYPE_SELF:
+            comp_eval = Evaluation.objects.filter(
+                cycle=evaluation.cycle,
+                evaluatee=evaluation.evaluatee,
+                evaluation_type=Evaluation.TYPE_PEER,
+            ).first()
 
-        if errors:
-            return Response(
-                {
-                    "detail": "This evaluation cannot be submitted yet.",
-                    "errors": errors,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        has_diff_2 = False
+        if comp_eval:
+            comp_answers = {ans.question_id: ans for ans in comp_eval.answers.all()}
+            for ans in evaluation.answers.all():
+                if ans.question_id in comp_answers:
+                    comp_ans = comp_answers[ans.question_id]
+                    if comp_ans.score is not None and abs(ans.score - comp_ans.score) >= 2:
+                        has_diff_2 = True
+                        if not ans.justification or not ans.justification.strip():
+                            return Response(
+                                {
+                                    "detail": f"Score difference of 2 or more on question {ans.question_id} requires a written justification."
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
 
-        evaluation.status = Evaluation.STATUS_LOCKED
+        if has_diff_2:
+            evaluation.status = Evaluation.STATUS_DIFF_REVIEW
+        else:
+            evaluation.status = Evaluation.STATUS_SUBMITTED
+
         evaluation.submitted_at = timezone.now()
         evaluation.save(update_fields=["status", "submitted_at", "updated_at"])
 
-        return Response(EvaluationSerializer(evaluation).data)
+        return Response(EvaluationSerializer(evaluation).data, status=status.HTTP_200_OK)
