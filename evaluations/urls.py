@@ -8,8 +8,10 @@ from .views import (
     EvaluationDetailView,
     EvaluationMineView,
     PeerAssignmentCreateView,
+    MyPeerAssignmentsView,
     SaveAnswersView,
     SubmitEvaluationView,
+    
 )
 
 urlpatterns = [
@@ -68,5 +70,11 @@ urlpatterns = [
 
     # GET /api/answers/{id}/
     path("api/answers/<int:pk>/", AnswerDetailView.as_view(), name="answer-detail"),
+    
+    path(
+    "peer-assignments/my/",
+    MyPeerAssignmentsView.as_view(),
+    name="my-peer-assignments",
+),
     path("answers/<int:pk>/", AnswerDetailView.as_view()),
 ]

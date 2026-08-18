@@ -23,6 +23,7 @@ class LoginSerializer(TokenObtainPairSerializer):
             "is_active": self.user.is_active,
             "is_staff": self.user.is_staff,
             "date_joined": self.user.date_joined,
+            "designation":self.user.designation,
         }
 
         return data

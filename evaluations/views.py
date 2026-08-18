@@ -98,7 +98,16 @@ class PeerAssignmentCreateView(APIView):
             PeerAssignmentSerializer(peer_assignment).data,
             status=status.HTTP_201_CREATED,
         )
+class MyPeerAssignmentsView(ListAPIView):
+    serializer_class = PeerAssignmentSerializer
+    permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        return (
+            PeerAssignment.objects
+            .filter(evaluator=self.request.user)
+            .select_related("cycle", "evaluator", "evaluatee")
+        )
 
 class EvaluationCreateView(APIView):
     permission_classes = [IsAuthenticated]
