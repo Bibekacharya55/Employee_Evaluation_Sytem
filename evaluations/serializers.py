@@ -62,6 +62,16 @@ class PeerAssignmentCreateSerializer(serializers.Serializer):
         ).exists():
             raise serializers.ValidationError("This peer assignment already exists.")
 
+        if PeerAssignment.objects.filter(
+        cycle_id=cycle_id,
+        evaluator_id=evaluatee_id,
+        evaluatee=evaluator,
+    ).exists():
+             raise serializers.ValidationError(
+            "Reciprocal peer assignments are not allowed."
+        )
+
+
         return attrs
 
     def create(self, validated_data):
