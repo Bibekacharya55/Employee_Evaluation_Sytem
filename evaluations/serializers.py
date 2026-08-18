@@ -109,9 +109,17 @@ class AnswerSerializer(serializers.ModelSerializer):
 
 
 class DraftAnswerItemSerializer(serializers.Serializer):
-    question_id = serializers.IntegerField()
+    question_id = serializers.IntegerField(required=False)
+    question = serializers.IntegerField(required=False)
     score = serializers.IntegerField(min_value=1, max_value=5)
     justification = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    def validate(self, attrs):
+        q_id = attrs.get("question_id") or attrs.get("question")
+        if not q_id:
+            raise serializers.ValidationError("Either question or question_id is required.")
+        attrs["question_id"] = q_id
+        return attrs
 
 
 class SaveAnswersSerializer(serializers.Serializer):
@@ -123,6 +131,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
     evaluator_id = serializers.IntegerField(read_only=True)
     evaluatee_id = serializers.IntegerField(read_only=True)
     peer_assignment_id = serializers.IntegerField(read_only=True, allow_null=True)
+    answers = AnswerSerializer(many=True, read_only=True)
 
     class Meta:
         model = Evaluation
@@ -137,6 +146,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "submitted_at",
             "created_at",
             "updated_at",
+            "answers",
         ]
 
 
@@ -185,13 +195,22 @@ class EvaluationDetailSerializer(EvaluationSerializer):
             questions = []
             for question in category.questions.all():
                 answer = answers_by_question.get(question.id)
+                if answer:
+                    answer_data = EvaluationDetailAnswerSerializer(answer).data
+                else:
+                    answer_data = {
+                        "id": None,
+                        "question_id": question.id,
+                        "score": None,
+                        "justification": None,
+                        "created_at": None,
+                        "updated_at": None,
+                    }
                 questions.append(
                     {
                         "id": question.id,
                         "text": question.text,
-                        "answer": EvaluationDetailAnswerSerializer(answer).data
-                        if answer
-                        else None,
+                        "answer": answer_data,
                     }
                 )
 
@@ -207,18 +226,32 @@ class EvaluationDetailSerializer(EvaluationSerializer):
 
 
 class EvaluationCreateSerializer(serializers.Serializer):
-    cycle_id = serializers.IntegerField()
-    evaluation_type = serializers.ChoiceField(choices=Evaluation.TYPE_CHOICES)
+    cycle_id = serializers.IntegerField(required=False)
+    cycle = serializers.IntegerField(required=False)
+    evaluation_type = serializers.ChoiceField(
+        choices=Evaluation.TYPE_CHOICES,
+        required=False,
+        default=Evaluation.TYPE_SELF,
+    )
     peer_assignment_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        evaluation_type = attrs["evaluation_type"]
-        peer_assignment_id = attrs.get("peer_assignment_id")
-        evaluator = self.context["request"].user
-        cycle_id = attrs["cycle_id"]
+        c_id = attrs.get("cycle_id") or attrs.get("cycle")
+        if not c_id:
+            active_cycle = EvaluationCycle.objects.filter(status=EvaluationCycle.STATUS_OPEN).first()
+            if not active_cycle:
+                raise serializers.ValidationError({"cycle_id": "No active evaluation cycle found."})
+            c_id = active_cycle.id
+        else:
+            if not EvaluationCycle.objects.filter(pk=c_id).exists():
+                raise serializers.ValidationError({"cycle_id": "Evaluation cycle not found."})
 
-        if not EvaluationCycle.objects.filter(pk=cycle_id).exists():
-            raise serializers.ValidationError({"cycle_id": "Evaluation cycle not found."})
+        attrs["cycle_id"] = c_id
+        evaluation_type = attrs.get("evaluation_type", Evaluation.TYPE_SELF)
+        attrs["evaluation_type"] = evaluation_type
+
+        evaluator = self.context["request"].user
+        peer_assignment_id = attrs.get("peer_assignment_id")
 
         if evaluation_type == Evaluation.TYPE_PEER:
             if not peer_assignment_id:
@@ -238,7 +271,7 @@ class EvaluationCreateSerializer(serializers.Serializer):
                     {"peer_assignment_id": "You are not the evaluator for this peer assignment."}
                 )
 
-            if peer_assignment.cycle_id != cycle_id:
+            if peer_assignment.cycle_id != c_id:
                 raise serializers.ValidationError(
                     {"peer_assignment_id": "Peer assignment does not belong to this cycle."}
                 )
