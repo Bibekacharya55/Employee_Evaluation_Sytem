@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from questions.models import Question
+from questions.models import Category, Question
 
 from .models import Answer, Evaluation, EvaluationCycle, PeerAssignment
 from .serializers import (
@@ -20,6 +20,7 @@ from .serializers import (
     PeerAssignmentCreateSerializer,
     PeerAssignmentSerializer,
     SaveAnswersSerializer,
+    SaveCategoryAnswersSerializer,
 )
 
 
@@ -239,6 +240,97 @@ class SaveAnswersView(APIView):
 
     def patch(self, request, pk):
         return update_evaluation_answers(pk, request.user, request.data)
+
+
+class SaveCategoryAnswersView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk, category_id=None):
+        try:
+            evaluation = Evaluation.objects.get(pk=pk)
+        except Evaluation.DoesNotExist:
+            return Response(
+                {"detail": "Evaluation not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if evaluation.evaluator != request.user and not request.user.is_staff:
+            return Response(
+                {"detail": "You do not have permission to edit this evaluation."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if evaluation.status != Evaluation.STATUS_DRAFT:
+            return Response(
+                {"detail": "This evaluation is locked and cannot be edited."},
+                status=status.HTTP_423_LOCKED,
+            )
+
+        serializer = SaveCategoryAnswersSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        target_category_id = category_id or serializer.validated_data.get("category_id")
+        if not target_category_id:
+            return Response(
+                {"detail": "Category ID is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not Category.objects.filter(pk=target_category_id).exists():
+            return Response(
+                {"detail": f"Category {target_category_id} not found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        saved_answers = []
+        for item in serializer.validated_data["answers"]:
+            question_id = item["question_id"]
+            score = item["score"]
+            justification = item.get("justification")
+
+            try:
+                question = Question.objects.get(pk=question_id)
+            except Question.DoesNotExist:
+                return Response(
+                    {"detail": f"Question {question_id} not found."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if question.category_id != target_category_id:
+                return Response(
+                    {
+                        "detail": f"Question {question_id} does not belong to category {target_category_id}."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            answer, created = Answer.objects.update_or_create(
+                evaluation=evaluation,
+                question=question,
+                defaults={
+                    "score": score,
+                    "justification": justification,
+                },
+            )
+
+            saved_answers.append(
+                {
+                    "questionId": question.id,
+                    "score": answer.score,
+                    "justification": answer.justification,
+                }
+            )
+
+        evaluation.status = Evaluation.STATUS_DRAFT
+        evaluation.save(update_fields=["status", "updated_at"])
+
+        return Response(
+            {
+                "categoryId": target_category_id,
+                "answers": saved_answers,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AnswerDetailView(RetrieveAPIView):

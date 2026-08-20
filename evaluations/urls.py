@@ -11,6 +11,7 @@ from .views import (
     MyPeerAssignmentsView,
     PeerAssignmentApproveView,
     SaveAnswersView,
+    SaveCategoryAnswersView,
     SubmitEvaluationView,
 )
 
@@ -50,6 +51,25 @@ urlpatterns = [
     # POST /api/evaluations/ and /evaluations/
     path("api/evaluations/", EvaluationCreateView.as_view(), name="evaluation-create"),
     path("evaluations/", EvaluationCreateView.as_view()),
+
+    # PATCH /api/evaluations/{id}/categories/{category_id}/answers/
+    path(
+        "api/evaluations/<int:pk>/categories/<int:category_id>/answers/",
+        SaveCategoryAnswersView.as_view(),
+        name="evaluation-save-category-answers",
+    ),
+    path(
+        "evaluations/<int:pk>/categories/<int:category_id>/answers/",
+        SaveCategoryAnswersView.as_view(),
+    ),
+    path(
+        "api/evaluations/<int:pk>/category/<int:category_id>/",
+        SaveCategoryAnswersView.as_view(),
+    ),
+    path(
+        "evaluations/<int:pk>/category/<int:category_id>/",
+        SaveCategoryAnswersView.as_view(),
+    ),
 
     # PATCH /api/evaluations/{id}/answers/ and /evaluations/{id}/answers/
     path(
