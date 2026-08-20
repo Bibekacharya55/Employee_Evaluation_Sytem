@@ -9,9 +9,9 @@ from .views import (
     EvaluationMineView,
     PeerAssignmentCreateView,
     MyPeerAssignmentsView,
+    PeerAssignmentApproveView,
     SaveAnswersView,
     SubmitEvaluationView,
-    
 )
 
 urlpatterns = [
@@ -29,7 +29,16 @@ urlpatterns = [
         "peer-assignments/available-employees/",
         AvailableEmployeesView.as_view(),
     ),
-
+    # PATCH /api/peer-assignments/{id}/approve/
+    path(
+        "api/peer-assignments/<int:pk>/approve/",
+        PeerAssignmentApproveView.as_view(),
+        name="peer-assignment-approve",
+    ),
+    path(
+        "peer-assignments/<int:pk>/approve/",
+        PeerAssignmentApproveView.as_view(),
+    ),
     # POST /api/peer-assignments/
     path("api/peer-assignments/", PeerAssignmentCreateView.as_view(), name="peer-assignment-create"),
     path("peer-assignments/", PeerAssignmentCreateView.as_view()),

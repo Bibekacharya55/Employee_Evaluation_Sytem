@@ -33,7 +33,15 @@ class PeerAssignmentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
+        read_only_fields = [
+            "id",
+            "cycle_id",
+            "evaluator_id",
+            "evaluatee_id",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
 
 class PeerAssignmentCreateSerializer(serializers.Serializer):
     cycle_id = serializers.IntegerField()
