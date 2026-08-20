@@ -252,3 +252,101 @@ class EvaluationsAPITestCase(APITestCase):
         ans1 = Answer.objects.get(evaluation=evaluation, question=self.question1)
         self.assertEqual(ans1.score, 5)
         self.assertIsNone(ans1.justification)
+
+    def test_category_level_answer_saving(self):
+        """TEST 5 — Category-level answer saving, editing, draft retention, and detail retrieval"""
+        # Create Category 2 and Question 3
+        cat2 = Category.objects.create(name="Communication Skills", order=2)
+        question3 = Question.objects.create(
+            category=cat2,
+            text="Question 3 text",
+            order=1,
+        )
+
+        evaluation = Evaluation.objects.create(
+            cycle=self.cycle,
+            evaluator=self.user_a,
+            evaluatee=self.user_a,
+            evaluation_type=Evaluation.TYPE_SELF,
+            status=Evaluation.STATUS_DRAFT,
+        )
+
+        # 1 & 2: Save answers for Category 1
+        url_cat1 = f"/api/evaluations/{evaluation.id}/categories/{self.category.id}/answers/"
+        cat1_payload = {
+            "categoryId": self.category.id,
+            "answers": [
+                {"questionId": self.question1.id, "score": 2},
+                {"questionId": self.question2.id, "score": 3},
+            ],
+        }
+        res1 = self.client.patch(url_cat1, cat1_payload, format="json")
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(res1.data["categoryId"], self.category.id)
+        self.assertEqual(len(res1.data["answers"]), 2)
+
+        # Check DB for Category 1 answers
+        self.assertEqual(
+            Answer.objects.filter(evaluation=evaluation, question=self.question1).get().score, 2
+        )
+        self.assertEqual(
+            Answer.objects.filter(evaluation=evaluation, question=self.question2).get().score, 3
+        )
+
+        # 3 & 4: Save answers for Category 2
+        url_cat2 = f"/api/evaluations/{evaluation.id}/categories/{cat2.id}/answers/"
+        cat2_payload = {
+            "categoryId": cat2.id,
+            "answers": [
+                {"questionId": question3.id, "score": 4},
+            ],
+        }
+        res2 = self.client.patch(url_cat2, cat2_payload, format="json")
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            Answer.objects.filter(evaluation=evaluation, question=question3).get().score, 4
+        )
+
+        # 5 & 6: Edit Category 1 answers again and verify update (no duplicate)
+        edit_cat1_payload = {
+            "categoryId": self.category.id,
+            "answers": [
+                {"questionId": self.question1.id, "score": 5},
+                {"questionId": self.question2.id, "score": 3},
+            ],
+        }
+        res3 = self.client.patch(url_cat1, edit_cat1_payload, format="json")
+        self.assertEqual(res3.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            Answer.objects.filter(evaluation=evaluation, question=self.question1).get().score, 5
+        )
+        self.assertEqual(
+            Answer.objects.filter(evaluation=evaluation, question=self.question1).count(), 1
+        )
+
+        # 7: Verify evaluation status is still draft
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.status, Evaluation.STATUS_DRAFT)
+
+        # 8: Verify answers via evaluation detail GET API
+        detail_res = self.client.get(f"/api/evaluations/{evaluation.id}/")
+        self.assertEqual(detail_res.status_code, status.HTTP_200_OK)
+        categories_data = detail_res.data["categories"]
+        self.assertTrue(len(categories_data) >= 2)
+
+        # 9: Verify invalid question/category combination rejected
+        invalid_payload = {
+            "categoryId": self.category.id,
+            "answers": [
+                {"questionId": question3.id, "score": 4},  # Question 3 belongs to Cat 2, not Cat 1!
+            ],
+        }
+        res_invalid = self.client.patch(url_cat1, invalid_payload, format="json")
+        self.assertEqual(res_invalid.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 10: Verify locked evaluation cannot be edited
+        evaluation.status = Evaluation.STATUS_SUBMITTED
+        evaluation.save()
+        res_locked = self.client.patch(url_cat1, cat1_payload, format="json")
+        self.assertEqual(res_locked.status_code, status.HTTP_423_LOCKED)
+

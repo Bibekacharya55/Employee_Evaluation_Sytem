@@ -289,3 +289,30 @@ class EvaluationCreateSerializer(serializers.Serializer):
             evaluation_type=validated_data["evaluation_type"],
             status=Evaluation.STATUS_DRAFT,
         )
+
+
+class CategoryAnswerItemSerializer(serializers.Serializer):
+    questionId = serializers.IntegerField(required=False)
+    question_id = serializers.IntegerField(required=False)
+    score = serializers.IntegerField(min_value=1, max_value=5)
+    justification = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    def validate(self, attrs):
+        q_id = attrs.get("questionId") or attrs.get("question_id")
+        if not q_id:
+            raise serializers.ValidationError("Either questionId or question_id is required.")
+        attrs["question_id"] = q_id
+        return attrs
+
+
+class SaveCategoryAnswersSerializer(serializers.Serializer):
+    categoryId = serializers.IntegerField(required=False)
+    category_id = serializers.IntegerField(required=False)
+    answers = CategoryAnswerItemSerializer(many=True)
+
+    def validate(self, attrs):
+        c_id = attrs.get("categoryId") or attrs.get("category_id")
+        if c_id:
+            attrs["category_id"] = c_id
+        return attrs
+
