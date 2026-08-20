@@ -108,6 +108,39 @@ class MyPeerAssignmentsView(ListAPIView):
             .filter(evaluator=self.request.user)
             .select_related("cycle", "evaluator", "evaluatee")
         )
+class PeerAssignmentApproveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            assignment = PeerAssignment.objects.get(pk=pk)
+        except PeerAssignment.DoesNotExist:
+            return Response(
+                {"detail": "Peer assignment not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Only the assigned evaluator can approve it
+        if assignment.evaluator != request.user:
+            return Response(
+                {"detail": "You do not have permission to approve this assignment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Only pending assignments can be approved
+        if assignment.status != PeerAssignment.STATUS_PENDING:
+            return Response(
+                {"detail": "Only pending assignments can be approved."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        assignment.status = PeerAssignment.STATUS_APPROVED
+        assignment.save(update_fields=["status", "updated_at"])
+
+        return Response(
+            PeerAssignmentSerializer(assignment).data,
+            status=status.HTTP_200_OK,
+        )
 
 class EvaluationCreateView(APIView):
     permission_classes = [IsAuthenticated]
