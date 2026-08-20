@@ -8,6 +8,8 @@ from .views import (
     EvaluationDetailView,
     EvaluationMineView,
     PeerAssignmentCreateView,
+    MyPeerAssignmentsView,
+    PeerAssignmentApproveView,
     SaveAnswersView,
     SubmitEvaluationView,
 )
@@ -27,7 +29,16 @@ urlpatterns = [
         "peer-assignments/available-employees/",
         AvailableEmployeesView.as_view(),
     ),
-
+    # PATCH /api/peer-assignments/{id}/approve/
+    path(
+        "api/peer-assignments/<int:pk>/approve/",
+        PeerAssignmentApproveView.as_view(),
+        name="peer-assignment-approve",
+    ),
+    path(
+        "peer-assignments/<int:pk>/approve/",
+        PeerAssignmentApproveView.as_view(),
+    ),
     # POST /api/peer-assignments/
     path("api/peer-assignments/", PeerAssignmentCreateView.as_view(), name="peer-assignment-create"),
     path("peer-assignments/", PeerAssignmentCreateView.as_view()),
@@ -68,5 +79,11 @@ urlpatterns = [
 
     # GET /api/answers/{id}/
     path("api/answers/<int:pk>/", AnswerDetailView.as_view(), name="answer-detail"),
+    
+    path(
+    "peer-assignments/my/",
+    MyPeerAssignmentsView.as_view(),
+    name="my-peer-assignments",
+),
     path("answers/<int:pk>/", AnswerDetailView.as_view()),
 ]

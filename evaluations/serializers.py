@@ -35,7 +35,15 @@ class PeerAssignmentSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
+        read_only_fields = [
+            "id",
+            "cycle_id",
+            "evaluator_id",
+            "evaluatee_id",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
 
 class PeerAssignmentCreateSerializer(serializers.Serializer):
     cycle_id = serializers.IntegerField()
@@ -63,6 +71,16 @@ class PeerAssignmentCreateSerializer(serializers.Serializer):
             evaluatee_id=evaluatee_id,
         ).exists():
             raise serializers.ValidationError("This peer assignment already exists.")
+
+        if PeerAssignment.objects.filter(
+        cycle_id=cycle_id,
+        evaluator_id=evaluatee_id,
+        evaluatee=evaluator,
+    ).exists():
+             raise serializers.ValidationError(
+            "Reciprocal peer assignments are not allowed."
+        )
+
 
         return attrs
 
