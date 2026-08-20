@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from accounts.models import User
+from questions.models import Category
 from .models import Answer, Evaluation, EvaluationCycle, PeerAssignment
 
 
@@ -52,7 +54,7 @@ class PeerAssignmentCreateSerializer(serializers.Serializer):
         if evaluator.id == evaluatee_id:
             raise serializers.ValidationError("You cannot assign yourself as a peer evaluatee.")
 
-        if not evaluator.__class__.objects.filter(pk=evaluatee_id, is_active=True).exists():
+        if not User.objects.filter(pk=evaluatee_id, is_active=True).exists():
             raise serializers.ValidationError({"evaluatee_id": "Employee not found."})
 
         if PeerAssignment.objects.filter(
@@ -155,18 +157,6 @@ class EvaluationDetailAnswerSerializer(serializers.ModelSerializer):
         ]
 
 
-class EvaluationDetailQuestionSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    text = serializers.CharField()
-    answer = EvaluationDetailAnswerSerializer(allow_null=True)
-
-
-class EvaluationDetailCategorySerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    name = serializers.CharField()
-    questions = EvaluationDetailQuestionSerializer(many=True)
-
-
 class EvaluationDetailSerializer(EvaluationSerializer):
     categories = serializers.SerializerMethodField()
 
@@ -174,8 +164,6 @@ class EvaluationDetailSerializer(EvaluationSerializer):
         fields = EvaluationSerializer.Meta.fields + ["categories"]
 
     def get_categories(self, evaluation):
-        from questions.models import Category
-
         answers_by_question = {
             answer.question_id: answer for answer in evaluation.answers.all()
         }

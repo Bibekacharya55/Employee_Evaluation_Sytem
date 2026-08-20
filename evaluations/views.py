@@ -128,6 +128,50 @@ class EvaluationMineView(ListAPIView):
         ).prefetch_related("answers")
 
 
+def update_evaluation_answers(evaluation_id, user, data):
+    try:
+        evaluation = Evaluation.objects.get(pk=evaluation_id)
+    except Evaluation.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    if evaluation.evaluator != user and not user.is_staff:
+        return Response(
+            {"detail": "You do not have permission to edit this evaluation."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if evaluation.status != Evaluation.STATUS_DRAFT:
+        return Response(
+            {"detail": "This evaluation is locked and cannot be edited."},
+            status=status.HTTP_423_LOCKED,
+        )
+
+    serializer = SaveAnswersSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+
+    for item in serializer.validated_data["answers"]:
+        question_id = item["question_id"]
+        if not Question.objects.filter(pk=question_id).exists():
+            return Response(
+                {"detail": f"Question {question_id} not found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        Answer.objects.update_or_create(
+            evaluation=evaluation,
+            question_id=question_id,
+            defaults={
+                "score": item["score"],
+                "justification": item.get("justification"),
+            },
+        )
+
+    evaluation.status = Evaluation.STATUS_DRAFT
+    evaluation.save(update_fields=["status", "updated_at"])
+
+    return Response(EvaluationSerializer(evaluation).data)
+
+
 class EvaluationDetailView(RetrieveAPIView):
     serializer_class = EvaluationDetailSerializer
     permission_classes = [IsAuthenticated]
@@ -145,54 +189,14 @@ class EvaluationDetailView(RetrieveAPIView):
         return qs.filter(Q(evaluator=user) | Q(evaluatee=user))
 
     def patch(self, request, pk):
-        return SaveAnswersView().patch(request, pk)
+        return update_evaluation_answers(pk, request.user, request.data)
 
 
 class SaveAnswersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
-        try:
-            evaluation = Evaluation.objects.get(pk=pk)
-        except Evaluation.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        if evaluation.evaluator != request.user and not request.user.is_staff:
-            return Response(
-                {"detail": "You do not have permission to edit this evaluation."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if evaluation.status != Evaluation.STATUS_DRAFT:
-            return Response(
-                {"detail": "This evaluation is locked and cannot be edited."},
-                status=status.HTTP_423_LOCKED,
-            )
-
-        serializer = SaveAnswersSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        for item in serializer.validated_data["answers"]:
-            question_id = item["question_id"]
-            if not Question.objects.filter(pk=question_id).exists():
-                return Response(
-                    {"detail": f"Question {question_id} not found."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            Answer.objects.update_or_create(
-                evaluation=evaluation,
-                question_id=question_id,
-                defaults={
-                    "score": item["score"],
-                    "justification": item.get("justification"),
-                },
-            )
-
-        evaluation.status = Evaluation.STATUS_DRAFT
-        evaluation.save(update_fields=["status", "updated_at"])
-
-        return Response(EvaluationSerializer(evaluation).data)
+        return update_evaluation_answers(pk, request.user, request.data)
 
 
 class AnswerDetailView(RetrieveAPIView):
