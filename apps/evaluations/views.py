@@ -75,7 +75,9 @@ class AvailableEmployeesView(APIView):
                     "first_name": employee.first_name,
                     "last_name": employee.last_name,
                     "role": employee.role,
+                    "designation": employee.designation,
                     "availability": "available"
+                    
                     if employee.id not in assigned_evaluatee_ids
                     else "assigned",
                 }
