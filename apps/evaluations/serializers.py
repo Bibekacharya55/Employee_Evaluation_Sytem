@@ -97,7 +97,8 @@ class AvailableEmployeeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     first_name = serializers.CharField()
     last_name = serializers.CharField()
-    role = serializers.CharField()
+    # role = serializers.CharField()
+    designation = serializers.CharField()
     availability = serializers.CharField()
 
 
