@@ -6,8 +6,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User
-from questions.models import Category, Question
+from apps.accounts.models import User
+from apps.questions.models import Category, Question
 
 from .models import Answer, Evaluation, EvaluationCycle, PeerAssignment
 from .serializers import (

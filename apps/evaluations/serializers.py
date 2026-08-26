@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
-from accounts.models import User
-from questions.models import Category
+from apps.accounts.models import User
+from apps.questions.models import Category
 from .models import Answer, Evaluation, EvaluationCycle, PeerAssignment
 
 
