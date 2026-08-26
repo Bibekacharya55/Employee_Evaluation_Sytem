@@ -17,7 +17,7 @@ from datetime import timedelta
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
+# sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
@@ -52,10 +52,12 @@ THIRD_PARTY_APPS = [
 
 ]
 LOCAL_APPS = [
-    'accounts',
-    'questions',
-    'evaluations',
-    'dashboard',
+    'apps.accounts',
+    'apps.questions',
+    'apps.evaluations',
+    'apps.dashboard',
+    'apps.manager',
+    'apps.reports'
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

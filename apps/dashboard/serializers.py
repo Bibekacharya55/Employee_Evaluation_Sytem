@@ -5,6 +5,7 @@ class DashboardEvaluateeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     first_name = serializers.CharField()
     last_name = serializers.CharField()
+    designation = serializers.CharField()
 
 
 class DashboardTodoSerializer(serializers.Serializer):
@@ -30,7 +31,21 @@ class DashboardCompletedSerializer(serializers.Serializer):
 
 class EmployeeDashboardSerializer(serializers.Serializer):
     role = serializers.CharField()
-    cycle = serializers.DictField()
+
+    cycle = serializers.DictField(
+        allow_null=True
+    )
+
     counts = serializers.DictField()
-    to_do = DashboardTodoSerializer(many=True)
-    completed = DashboardCompletedSerializer(many=True)
+
+    to_do = DashboardTodoSerializer(
+        many=True
+    )
+
+    completed = DashboardCompletedSerializer(
+        many=True
+    )
+
+    manager_access = serializers.DictField(
+        required=False
+    )

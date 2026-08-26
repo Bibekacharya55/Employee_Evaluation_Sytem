@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
-from questions.models import Question
+from apps.questions.models import Question
 
 
 class EvaluationCycle(models.Model):
