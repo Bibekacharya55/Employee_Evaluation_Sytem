@@ -137,10 +137,17 @@ class SaveAnswersSerializer(serializers.Serializer):
     answers = DraftAnswerItemSerializer(many=True)
 
 
+class EvaluatorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "first_name", "last_name"]
+
+
 class EvaluationSerializer(serializers.ModelSerializer):
     cycle_id = serializers.IntegerField(read_only=True)
     evaluator_id = serializers.IntegerField(read_only=True)
     evaluatee_id = serializers.IntegerField(read_only=True)
+    evaluator = EvaluatorSerializer(read_only=True)
     peer_assignment_id = serializers.IntegerField(read_only=True, allow_null=True)
     answers = AnswerSerializer(many=True, read_only=True)
 
@@ -151,6 +158,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "cycle_id",
             "evaluator_id",
             "evaluatee_id",
+            "evaluator",
             "peer_assignment_id",
             "evaluation_type",
             "status",

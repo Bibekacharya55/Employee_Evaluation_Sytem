@@ -1,12 +1,18 @@
 from django.urls import path
 
 from .views import (
+    ManagerDashboardView,
     ManagerEmployeeReviewView,
     FinalReviewCreateView,
 )
 
 
 urlpatterns = [
+    path(
+        "dashboard/",
+        ManagerDashboardView.as_view(),
+        name="manager-dashboard",
+    ),
 
     path(
         "employees/<int:employee_id>/review/",
