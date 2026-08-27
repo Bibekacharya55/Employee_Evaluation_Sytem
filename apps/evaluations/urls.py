@@ -12,10 +12,21 @@ from .views import (
     PeerAssignmentApproveView,
     SaveAnswersView,
     SaveCategoryAnswersView,
+    ScoreCheckView,
     SubmitEvaluationView,
 )
 
 urlpatterns = [
+    # POST /api/evaluations/{id}/score-check/ and /evaluations/{id}/score-check/
+    path(
+        "api/evaluations/<int:pk>/score-check/",
+        ScoreCheckView.as_view(),
+        name="evaluation-score-check",
+    ),
+    path(
+        "evaluations/<int:pk>/score-check/",
+        ScoreCheckView.as_view(),
+    ),
     # GET /api/evaluation-cycles/ and /evaluation-cycles/
     path("api/evaluation-cycles/", EvaluationCycleListView.as_view(), name="evaluation-cycle-list"),
     path("evaluation-cycles/", EvaluationCycleListView.as_view()),
