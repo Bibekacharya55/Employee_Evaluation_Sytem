@@ -11,8 +11,5 @@ class IsManager(BasePermission):
 
         return (
             request.user.is_authenticated
-            and (
-                request.user.role == User.ROLE_MANAGER
-                or request.user.is_superuser
-            )
+            and getattr(request.user, "is_staff", False) is True
         )

@@ -1,69 +1,53 @@
 import csv
 
 from django.http import HttpResponse
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-
-from apps.evaluations.models import Evaluation
 from django.shortcuts import get_object_or_404
-
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 
-from apps.evaluations.models import (
-    Evaluation,
-    EvaluationCycle,
-)
-
+from apps.evaluations.models import Evaluation, EvaluationCycle
 from .serializers import (
-    ReportListSerializer,
     ReportDetailSerializer,
+    ReportListSerializer,
 )
 
 
 class ReportExportView(APIView):
-
-    permission_classes = [
-        IsAuthenticated,
-    ]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-
-        cycle_id = request.query_params.get(
-            "cycle_id"
-        )
-
-        file_format = request.query_params.get(
-            "format"
-        )
-
-        # ----------------------------------
-        # Validate format
-        # ----------------------------------
+        cycle_id = request.query_params.get("cycle_id")
+        file_format = request.query_params.get("format")
 
         if file_format != "csv":
-            return HttpResponse(
-                "Only CSV format is supported.",
-                status=400,
+            return Response(
+                {"detail": "Only CSV format is supported."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-
-        # ----------------------------------
-        # Validate cycle
-        # ----------------------------------
 
         if not cycle_id:
-            return HttpResponse(
-                "cycle_id is required.",
-                status=400,
+            return Response(
+                {"detail": "cycle_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------
-        # Get evaluations
-        # ----------------------------------
+        try:
+            cycle_id_int = int(cycle_id)
+            if not EvaluationCycle.objects.filter(id=cycle_id_int).exists():
+                return Response(
+                    {"detail": "Evaluation cycle not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except ValueError:
+            return Response(
+                {"detail": "Invalid cycle_id format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         evaluations = Evaluation.objects.filter(
-            cycle_id=cycle_id
+            cycle_id=cycle_id_int
         ).select_related(
             "evaluator",
             "evaluatee",
@@ -71,23 +55,10 @@ class ReportExportView(APIView):
             "answers__question__category"
         )
 
-        # ----------------------------------
-        # Create CSV response
-        # ----------------------------------
-
-        response = HttpResponse(
-            content_type="text/csv"
-        )
-
-        response[
-            "Content-Disposition"
-        ] = 'attachment; filename="evaluation_report.csv"'
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="evaluation_report.csv"'
 
         writer = csv.writer(response)
-
-        # ----------------------------------
-        # CSV header
-        # ----------------------------------
 
         writer.writerow([
             "employee",
@@ -103,23 +74,14 @@ class ReportExportView(APIView):
             "updated_at",
         ])
 
-        # ----------------------------------
-        # CSV rows
-        # ----------------------------------
-
         for evaluation in evaluations:
-
-            employee_name = (
-                f"{evaluation.evaluatee.first_name} "
-                f"{evaluation.evaluatee.last_name}"
-            )
-
-            evaluator_name = (
-                f"{evaluation.evaluator.first_name} "
-                f"{evaluation.evaluator.last_name}"
-            )
+            employee_name = f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}".strip()
+            evaluator_name = f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}".strip()
 
             for answer in evaluation.answers.all():
+                submitted_at_str = evaluation.submitted_at.isoformat() if evaluation.submitted_at else ""
+                created_at_str = evaluation.created_at.isoformat() if evaluation.created_at else ""
+                updated_at_str = evaluation.updated_at.isoformat() if evaluation.updated_at else ""
 
                 writer.writerow([
                     employee_name,
@@ -128,327 +90,197 @@ class ReportExportView(APIView):
                     answer.question.category.name,
                     answer.question.text,
                     answer.score,
-                    answer.justification,
+                    answer.justification or "",
                     evaluation.status,
-                    evaluation.submitted_at,
-                    evaluation.created_at,
-                    evaluation.updated_at,
+                    submitted_at_str,
+                    created_at_str,
+                    updated_at_str,
                 ])
 
         return response
 
-class ReportListView(APIView):
 
-    permission_classes = [
-        IsAuthenticated,
-    ]
+class ReportListView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-
-        cycle_id = request.query_params.get(
-            "cycle_id"
-        )
+        cycle_id = request.query_params.get("cycle_id")
 
         if not cycle_id:
             return Response(
-                {
-                    "detail": "cycle_id is required."
-                },
-                status=400,
+                {"detail": "cycle_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get evaluations for this cycle
+        try:
+            cycle_id_int = int(cycle_id)
+            if not EvaluationCycle.objects.filter(id=cycle_id_int).exists():
+                return Response(
+                    {"detail": "Evaluation cycle not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except ValueError:
+            return Response(
+                {"detail": "Invalid cycle_id format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         evaluations = Evaluation.objects.filter(
-            cycle_id=cycle_id
+            cycle_id=cycle_id_int
         ).select_related(
             "evaluator",
             "evaluatee",
-        )
+        ).prefetch_related("answers")
 
         reports = []
 
         for evaluation in evaluations:
-
-            # Calculate overall score
             answers = evaluation.answers.all()
 
             if answers.exists():
-
-                total_score = sum(
-                    answer.score
-                    for answer in answers
-                )
-
-                overall_score = round(
-                    total_score / answers.count(),
-                    2
-                )
-
+                total_score = sum(answer.score for answer in answers)
+                overall_score = round(total_score / answers.count(), 2)
             else:
                 overall_score = 0.0
 
-            employee_name = (
-                f"{evaluation.evaluatee.first_name} "
-                f"{evaluation.evaluatee.last_name}"
-            )
-
-            evaluator_name = (
-                f"{evaluation.evaluator.first_name} "
-                f"{evaluation.evaluator.last_name}"
-            )
+            employee_name = f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}".strip()
+            evaluator_name = f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}".strip()
 
             reports.append({
                 "evaluation_id": evaluation.id,
-
                 "employee": employee_name,
-
                 "evaluating": evaluator_name,
-
                 "status": evaluation.status,
-
                 "overall_score": overall_score,
             })
 
-        serializer = ReportListSerializer(
-            reports,
-            many=True,
-        )
-
+        serializer = ReportListSerializer(reports, many=True)
         return Response(serializer.data)
 
-class ReportDetailView(APIView):
 
-    permission_classes = [
-        IsAuthenticated,
-    ]
+class ReportDetailView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, evaluation_id):
-
-        # ----------------------------------
-        # 1. Get peer evaluation
-        # ----------------------------------
-
-        peer_evaluation = get_object_or_404(
+        evaluation = get_object_or_404(
             Evaluation.objects.select_related(
                 "evaluatee",
                 "evaluator",
+                "cycle",
             ),
             id=evaluation_id,
-            evaluation_type=Evaluation.TYPE_PEER,
         )
 
-        employee = peer_evaluation.evaluatee
-        evaluator = peer_evaluation.evaluator
+        employee = evaluation.evaluatee
+        cycle = evaluation.cycle
 
-        # ----------------------------------
-        # 2. Find employee self evaluation
-        # ----------------------------------
-
-        self_evaluation = Evaluation.objects.filter(
-            cycle=peer_evaluation.cycle,
-            evaluator=employee,
-            evaluatee=employee,
-            evaluation_type=Evaluation.TYPE_SELF,
-        ).first()
-
-        # ----------------------------------
-        # 3. Build self answer dictionary
-        # ----------------------------------
+        if evaluation.evaluation_type == Evaluation.TYPE_PEER:
+            peer_evaluation = evaluation
+            evaluator = peer_evaluation.evaluator
+            self_evaluation = Evaluation.objects.filter(
+                cycle=cycle,
+                evaluator=employee,
+                evaluatee=employee,
+                evaluation_type=Evaluation.TYPE_SELF,
+            ).first()
+        else:
+            self_evaluation = evaluation
+            peer_evaluation = Evaluation.objects.filter(
+                cycle=cycle,
+                evaluatee=employee,
+                evaluation_type=Evaluation.TYPE_PEER,
+            ).select_related("evaluator").first()
+            evaluator = peer_evaluation.evaluator if peer_evaluation else evaluation.evaluator
 
         self_answers = {}
-
         if self_evaluation:
-
             for answer in self_evaluation.answers.select_related(
                 "question",
                 "question__category",
             ):
-
-                self_answers[
-                    answer.question_id
-                ] = answer
-
-        # ----------------------------------
-        # 4. Build peer answer dictionary
-        # ----------------------------------
+                self_answers[answer.question_id] = answer
 
         peer_answers = {}
+        if peer_evaluation:
+            for answer in peer_evaluation.answers.select_related(
+                "question",
+                "question__category",
+            ):
+                peer_answers[answer.question_id] = answer
 
-        for answer in peer_evaluation.answers.select_related(
-            "question",
-            "question__category",
-        ):
+        question_ids = set(self_answers.keys()) | set(peer_answers.keys())
 
-            peer_answers[
-                answer.question_id
-            ] = answer
-
-        # ----------------------------------
-        # 5. Get all questions
-        # ----------------------------------
-
-        question_ids = set(
-            self_answers.keys()
-        ) | set(
-            peer_answers.keys()
-        )
-
-        # ----------------------------------
-        # 6. Build categories
-        # ----------------------------------
-
-        categories = {}
+        categories_dict = {}
 
         for question_id in question_ids:
+            self_answer = self_answers.get(question_id)
+            peer_answer = peer_answers.get(question_id)
+            answer_reference = peer_answer or self_answer
 
-            self_answer = self_answers.get(
-                question_id
-            )
+            if not answer_reference:
+                continue
 
-            peer_answer = peer_answers.get(
-                question_id
-            )
-
-            # Get question from either answer
-            answer_reference = (
-                peer_answer
-                or self_answer
-            )
-
-            question = (
-                answer_reference.question
-            )
-
+            question = answer_reference.question
             category = question.category
 
-            # Create category if needed
-            if category.id not in categories:
-
-                categories[category.id] = {
+            if category.id not in categories_dict:
+                categories_dict[category.id] = {
                     "name": category.name,
+                    "order": getattr(category, "order", 0),
                     "questions": [],
                 }
 
-            # ----------------------------------
-            # Scores
-            # ----------------------------------
-
-            self_score = (
-                self_answer.score
-                if self_answer
-                else None
-            )
-
-            peer_score = (
-                peer_answer.score
-                if peer_answer
-                else None
-            )
-
-            # ----------------------------------
-            # Difference
-            # ----------------------------------
+            self_score = self_answer.score if self_answer else None
+            peer_score = peer_answer.score if peer_answer else None
 
             diff = None
+            if self_score is not None and peer_score is not None:
+                diff = abs(self_score - peer_score)
 
-            if (
-                self_score is not None
-                and peer_score is not None
-            ):
-                diff = abs(
-                    self_score - peer_score
-                )
-
-            # ----------------------------------
-            # Question result
-            # ----------------------------------
-
-            categories[
-                category.id
-            ]["questions"].append({
-
-                "question_text":
-                    question.text,
-
-                "peer_score":
-                    peer_score,
-
-                "self_score":
-                    self_score,
-
-                "diff":
-                    diff,
-
-                "self_justification":
-                    (
-                        self_answer.justification
-                        if self_answer
-                        else None
-                    ),
-
-                "peer_justification":
-                    (
-                        peer_answer.justification
-                        if peer_answer
-                        else None
-                    ),
+            categories_dict[category.id]["questions"].append({
+                "question_text": question.text,
+                "peer_score": peer_score,
+                "self_score": self_score,
+                "diff": diff,
+                "self_justification": self_answer.justification if self_answer else None,
+                "peer_justification": peer_answer.justification if peer_answer else None,
             })
 
-        # ----------------------------------
-        # 7. Calculate overall peer score
-        # ----------------------------------
+        target_answers = list(peer_answers.values()) if peer_answers else list(self_answers.values())
 
-        peer_answers_list = list(
-            peer_answers.values()
-        )
-
-        if peer_answers_list:
-
+        if target_answers:
             overall_score = round(
-                sum(
-                    answer.score
-                    for answer in peer_answers_list
-                )
-                / len(peer_answers_list),
+                sum(answer.score for answer in target_answers) / len(target_answers),
                 2,
             )
-
         else:
-
             overall_score = 0.0
 
-        # ----------------------------------
-        # 8. Final response
-        # ----------------------------------
+        role_name = getattr(employee, "designation", None) or getattr(employee, "role", "")
+
+        sorted_categories = sorted(
+            categories_dict.values(),
+            key=lambda c: (c["order"], c["name"])
+        )
+        for cat_data in sorted_categories:
+            cat_data.pop("order", None)
 
         data = {
-
             "evaluatee": {
                 "id": employee.id,
                 "first_name": employee.first_name,
                 "last_name": employee.last_name,
-                "role": employee.designation,
+                "role": role_name,
             },
-
             "evaluator": {
                 "id": evaluator.id,
                 "first_name": evaluator.first_name,
                 "last_name": evaluator.last_name,
             },
-
-            "status": peer_evaluation.status,
-
+            "status": evaluation.status,
             "overall_score": overall_score,
-
-            "categories": list(
-                categories.values()
-            ),
+            "categories": sorted_categories,
         }
 
-        serializer = ReportDetailSerializer(
-            data
-        )
-
-        return Response(
-            serializer.data
-        )
+        serializer = ReportDetailSerializer(data)
+        return Response(serializer.data)
