@@ -178,20 +178,32 @@ class EvaluationDetailAnswerSerializer(serializers.ModelSerializer):
 
 class EvaluationDetailSerializer(EvaluationSerializer):
     categories = serializers.SerializerMethodField()
+    score_check_required = serializers.SerializerMethodField()
 
     class Meta(EvaluationSerializer.Meta):
-        fields = EvaluationSerializer.Meta.fields + ["categories"]
+        fields = EvaluationSerializer.Meta.fields + ["categories", "score_check_required"]
+
+    def get_score_check_required(self, evaluation):
+        return evaluation.status == Evaluation.STATUS_DIFF_REVIEW
 
     def get_categories(self, evaluation):
         answers_by_question = {
             answer.question_id: answer for answer in evaluation.answers.all()
         }
 
+        comp_eval = Evaluation.objects.filter(
+            cycle=evaluation.cycle,
+            evaluatee=evaluation.evaluatee,
+            evaluation_type=Evaluation.TYPE_SELF if evaluation.evaluation_type == Evaluation.TYPE_PEER else Evaluation.TYPE_PEER,
+        ).first()
+        comp_answers = {ans.question_id: ans for ans in comp_eval.answers.all()} if comp_eval else {}
+
         categories = []
         for category in Category.objects.prefetch_related("questions").all():
             questions = []
             for question in category.questions.all():
                 answer = answers_by_question.get(question.id)
+                comp_answer = comp_answers.get(question.id)
                 if answer:
                     answer_data = EvaluationDetailAnswerSerializer(answer).data
                 else:
@@ -203,11 +215,26 @@ class EvaluationDetailSerializer(EvaluationSerializer):
                         "created_at": None,
                         "updated_at": None,
                     }
+
+                if evaluation.evaluation_type == Evaluation.TYPE_SELF:
+                    self_score = answer.score if answer else None
+                    peer_score = comp_answer.score if comp_answer else None
+                else:
+                    peer_score = answer.score if answer else None
+                    self_score = comp_answer.score if comp_answer else None
+
+                diff = abs(self_score - peer_score) if (self_score is not None and peer_score is not None) else 0
+                q_requires_score_check = (diff >= 2) and (evaluation.status in (Evaluation.STATUS_DIFF_REVIEW, Evaluation.STATUS_LOCKED))
+
                 questions.append(
                     {
                         "id": question.id,
                         "text": question.text,
                         "answer": answer_data,
+                        "self_score": self_score,
+                        "peer_score": peer_score,
+                        "difference": diff,
+                        "requires_score_check": q_requires_score_check,
                     }
                 )
 
@@ -316,4 +343,14 @@ class SaveCategoryAnswersSerializer(serializers.Serializer):
         if c_id:
             attrs["category_id"] = c_id
         return attrs
+
+
+class ScoreCheckItemSerializer(serializers.Serializer):
+    question_id = serializers.IntegerField()
+    justification = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+
+
+class ScoreCheckSerializer(serializers.Serializer):
+    justifications = ScoreCheckItemSerializer(many=True)
+
 
