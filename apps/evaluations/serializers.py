@@ -143,11 +143,28 @@ class EvaluatorSerializer(serializers.ModelSerializer):
         fields = ["id", "first_name", "last_name"]
 
 
+class UserBasicSerializer(serializers.ModelSerializer):
+    designation = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ["id", "first_name", "last_name", "designation"]
+
+    def get_designation(self, obj):
+        return getattr(obj, "role", None) or getattr(obj, "designation", "Developer")
+
+
 class EvaluationSerializer(serializers.ModelSerializer):
     cycle_id = serializers.IntegerField(read_only=True)
     evaluator_id = serializers.IntegerField(read_only=True)
     evaluatee_id = serializers.IntegerField(read_only=True)
-    evaluator = EvaluatorSerializer(read_only=True)
+
+    # 1. Update evaluator to use UserBasicSerializer
+    evaluator = UserBasicSerializer(read_only=True)
+
+    # 2. Add evaluatee explicitly with UserBasicSerializer
+    evaluatee = UserBasicSerializer(read_only=True)
+
     peer_assignment_id = serializers.IntegerField(read_only=True, allow_null=True)
     answers = AnswerSerializer(many=True, read_only=True)
 
@@ -159,6 +176,7 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "evaluator_id",
             "evaluatee_id",
             "evaluator",
+            "evaluatee",
             "peer_assignment_id",
             "evaluation_type",
             "status",
@@ -184,12 +202,16 @@ class EvaluationDetailAnswerSerializer(serializers.ModelSerializer):
         ]
 
 
+
 class EvaluationDetailSerializer(EvaluationSerializer):
     categories = serializers.SerializerMethodField()
     score_check_required = serializers.SerializerMethodField()
 
     class Meta(EvaluationSerializer.Meta):
-        fields = EvaluationSerializer.Meta.fields + ["categories", "score_check_required"]
+        fields = EvaluationSerializer.Meta.fields + [
+            "categories",
+            "score_check_required",
+        ]
 
     def get_score_check_required(self, evaluation):
         return evaluation.status == Evaluation.STATUS_DIFF_REVIEW
@@ -202,9 +224,15 @@ class EvaluationDetailSerializer(EvaluationSerializer):
         comp_eval = Evaluation.objects.filter(
             cycle=evaluation.cycle,
             evaluatee=evaluation.evaluatee,
-            evaluation_type=Evaluation.TYPE_SELF if evaluation.evaluation_type == Evaluation.TYPE_PEER else Evaluation.TYPE_PEER,
+            evaluation_type=Evaluation.TYPE_SELF
+            if evaluation.evaluation_type == Evaluation.TYPE_PEER
+            else Evaluation.TYPE_PEER,
         ).first()
-        comp_answers = {ans.question_id: ans for ans in comp_eval.answers.all()} if comp_eval else {}
+        comp_answers = (
+            {ans.question_id: ans for ans in comp_eval.answers.all()}
+            if comp_eval
+            else {}
+        )
 
         categories = []
         for category in Category.objects.prefetch_related("questions").all():
@@ -231,8 +259,15 @@ class EvaluationDetailSerializer(EvaluationSerializer):
                     peer_score = answer.score if answer else None
                     self_score = comp_answer.score if comp_answer else None
 
-                diff = abs(self_score - peer_score) if (self_score is not None and peer_score is not None) else 0
-                q_requires_score_check = (diff >= 2) and (evaluation.status in (Evaluation.STATUS_DIFF_REVIEW, Evaluation.STATUS_LOCKED))
+                diff = (
+                    abs(self_score - peer_score)
+                    if (self_score is not None and peer_score is not None)
+                    else 0
+                )
+                q_requires_score_check = (diff >= 2) and (
+                    evaluation.status
+                    in (Evaluation.STATUS_DIFF_REVIEW, Evaluation.STATUS_LOCKED)
+                )
 
                 questions.append(
                     {
