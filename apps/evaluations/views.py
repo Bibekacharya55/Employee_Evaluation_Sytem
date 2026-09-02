@@ -437,59 +437,91 @@ class ScoreCheckView(APIView):
 
     def get(self, request, pk):
         try:
-            evaluation = Evaluation.objects.select_related(
-                "cycle", "evaluator", "evaluatee"
-            ).prefetch_related("answers__question").get(pk=pk)
+            evaluation = (
+                Evaluation.objects.select_related("cycle", "evaluator", "evaluatee")
+                .prefetch_related("answers__question")
+                .get(pk=pk)
+            )
+
         except Evaluation.DoesNotExist:
             return Response(
                 {"detail": "Evaluation not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # ---------------------------------------------------------
+        # Permission check
+        # ---------------------------------------------------------
         if (
             evaluation.evaluator != request.user
             and evaluation.evaluatee != request.user
             and not request.user.is_staff
         ):
             return Response(
-                {"detail": "You do not have permission to perform score check on this evaluation."},
+                {
+                    "detail": (
+                        "You do not have permission to perform "
+                        "score check on this evaluation."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # ---------------------------------------------------------
         # Counterpart evaluation lookup
-        comp_eval = Evaluation.objects.filter(
-            cycle=evaluation.cycle,
-            evaluatee=evaluation.evaluatee,
-            evaluation_type=(
-                Evaluation.TYPE_SELF
-                if evaluation.evaluation_type == Evaluation.TYPE_PEER
-                else Evaluation.TYPE_PEER
-            ),
-        ).prefetch_related("answers__question").first()
+        # ---------------------------------------------------------
+        comp_eval = (
+            Evaluation.objects.filter(
+                cycle=evaluation.cycle,
+                evaluatee=evaluation.evaluatee,
+                evaluation_type=(
+                    Evaluation.TYPE_SELF
+                    if evaluation.evaluation_type == Evaluation.TYPE_PEER
+                    else Evaluation.TYPE_PEER
+                ),
+            )
+            .prefetch_related("answers__question")
+            .first()
+        )
 
-        # Map your_eval and counterpart_eval based on authenticated user
+        # ---------------------------------------------------------
+        # Decide which evaluation belongs to the current user
+        # ---------------------------------------------------------
         if evaluation.evaluator == request.user:
             your_eval = evaluation
             counterpart_eval = comp_eval
+
         elif evaluation.evaluatee == request.user:
             your_eval = comp_eval
             counterpart_eval = evaluation
+
         else:
             your_eval = evaluation
             counterpart_eval = comp_eval
 
+        # ---------------------------------------------------------
+        # Your answers
+        # ---------------------------------------------------------
         your_answers = (
             {ans.question_id: ans for ans in your_eval.answers.all()}
             if your_eval
             else {}
         )
+
+        # ---------------------------------------------------------
+        # Counterpart answers
+        # ---------------------------------------------------------
         counterpart_answers = (
             {ans.question_id: ans for ans in counterpart_eval.answers.all()}
             if counterpart_eval
             else {}
         )
 
+        # ---------------------------------------------------------
+        # Evaluatee
+        # ---------------------------------------------------------
         evaluatee = evaluation.evaluatee
+
         evaluatee_data = {
             "id": evaluatee.id,
             "first_name": evaluatee.first_name,
@@ -497,30 +529,55 @@ class ScoreCheckView(APIView):
             "designation": evaluatee.designation or "",
         }
 
+        # ---------------------------------------------------------
+        # Categories
+        # ---------------------------------------------------------
         categories_dict = {}
+
         for category in Category.objects.prefetch_related("questions").all():
             cat_questions = []
+
             for question in category.questions.all():
                 y_ans = your_answers.get(question.id)
+
                 c_ans = counterpart_answers.get(question.id)
 
+                # Your score
                 y_score = y_ans.score if y_ans else None
+
+                # Counterpart score
                 c_score = c_ans.score if c_ans else None
 
+                # -------------------------------------------------
+                # Calculate difference
+                # -------------------------------------------------
                 if y_score is not None and c_score is not None:
                     diff = abs(y_score - c_score)
+
                 else:
                     diff = 0
 
+                # -------------------------------------------------
+                # Only questions with difference >= 2
+                # -------------------------------------------------
                 if diff >= 2:
                     y_just = (
                         y_ans.justification.strip()
-                        if (y_ans and y_ans.justification and y_ans.justification.strip())
+                        if (
+                            y_ans
+                            and y_ans.justification
+                            and y_ans.justification.strip()
+                        )
                         else None
                     )
+
                     c_just = (
                         c_ans.justification.strip()
-                        if (c_ans and c_ans.justification and c_ans.justification.strip())
+                        if (
+                            c_ans
+                            and c_ans.justification
+                            and c_ans.justification.strip()
+                        )
                         else None
                     )
 
@@ -536,6 +593,9 @@ class ScoreCheckView(APIView):
                         }
                     )
 
+            # -----------------------------------------------------
+            # Add category only if it has diff >= 2 questions
+            # -----------------------------------------------------
             if cat_questions:
                 categories_dict[category.id] = {
                     "category_id": category.id,
@@ -543,16 +603,25 @@ class ScoreCheckView(APIView):
                     "questions": cat_questions,
                 }
 
+        # ---------------------------------------------------------
+        # Count remaining justifications
+        # ---------------------------------------------------------
         remaining_count = 0
+
         for cat_data in categories_dict.values():
             for q_item in cat_data["questions"]:
                 if q_item["your_justification"] is None:
                     remaining_count += 1
 
+        # ---------------------------------------------------------
+        # Response
+        # ---------------------------------------------------------
         return Response(
             {
-                "evaluation_id": your_eval.id if your_eval else evaluation.id,
-                "counterpart_evaluation_id": counterpart_eval.id if counterpart_eval else None,
+                "evaluation_id": (your_eval.id if your_eval else evaluation.id),
+                "counterpart_evaluation_id": (
+                    counterpart_eval.id if counterpart_eval else None
+                ),
                 "evaluatee": evaluatee_data,
                 "remaining_count": remaining_count,
                 "categories": list(categories_dict.values()),
@@ -560,143 +629,269 @@ class ScoreCheckView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    # =============================================================
+    # POST
+    # =============================================================
     def post(self, request, pk):
+
         try:
             evaluation = Evaluation.objects.prefetch_related("answers").get(pk=pk)
+
         except Evaluation.DoesNotExist:
             return Response(
                 {"detail": "Evaluation not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # ---------------------------------------------------------
+        # Permission
+        # ---------------------------------------------------------
         if evaluation.evaluator != request.user and not request.user.is_staff:
             return Response(
-                {"detail": "You do not have permission to perform score check on this evaluation."},
+                {
+                    "detail": (
+                        "You do not have permission to perform "
+                        "score check on this evaluation."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # ---------------------------------------------------------
+        # Locked evaluation
+        # ---------------------------------------------------------
         if evaluation.status == Evaluation.STATUS_LOCKED:
             return Response(
-                {"detail": "This evaluation is locked and cannot be modified."},
+                {"detail": ("This evaluation is locked and cannot be modified.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ---------------------------------------------------------
+        # Must be diff-review
+        # ---------------------------------------------------------
         if evaluation.status != Evaluation.STATUS_DIFF_REVIEW:
             return Response(
-                {"detail": "Evaluation is not in diff-review status."},
+                {"detail": ("Evaluation is not in diff-review status.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Counterpart evaluation lookup
+        # ---------------------------------------------------------
+        # Counterpart evaluation
+        # ---------------------------------------------------------
         comp_eval = Evaluation.objects.filter(
             cycle=evaluation.cycle,
             evaluatee=evaluation.evaluatee,
-            evaluation_type=Evaluation.TYPE_SELF if evaluation.evaluation_type == Evaluation.TYPE_PEER else Evaluation.TYPE_PEER,
+            evaluation_type=(
+                Evaluation.TYPE_SELF
+                if evaluation.evaluation_type == Evaluation.TYPE_PEER
+                else Evaluation.TYPE_PEER
+            ),
         ).first()
 
-        if not comp_eval or comp_eval.status in (Evaluation.STATUS_DRAFT, Evaluation.STATUS_NOT_STARTED):
+        if not comp_eval or comp_eval.status in (
+            Evaluation.STATUS_DRAFT,
+            Evaluation.STATUS_NOT_STARTED,
+        ):
             return Response(
-                {"detail": "Counterpart evaluation has not been submitted yet."},
+                {"detail": ("Counterpart evaluation has not been submitted yet.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Determine required questions (abs(self_score - peer_score) >= 2)
-        peer_eval = evaluation if evaluation.evaluation_type == Evaluation.TYPE_PEER else comp_eval
-        self_eval = comp_eval if evaluation.evaluation_type == Evaluation.TYPE_PEER else evaluation
+        # ---------------------------------------------------------
+        # Determine peer and self evaluation
+        # ---------------------------------------------------------
+        peer_eval = (
+            evaluation
+            if evaluation.evaluation_type == Evaluation.TYPE_PEER
+            else comp_eval
+        )
 
+        self_eval = (
+            comp_eval
+            if evaluation.evaluation_type == Evaluation.TYPE_PEER
+            else evaluation
+        )
+
+        # ---------------------------------------------------------
+        # Peer answers
+        # ---------------------------------------------------------
         peer_answers = {ans.question_id: ans for ans in peer_eval.answers.all()}
+
+        # ---------------------------------------------------------
+        # Self answers
+        # ---------------------------------------------------------
         self_answers = {ans.question_id: ans for ans in self_eval.answers.all()}
 
+        # ---------------------------------------------------------
+        # Find questions with difference >= 2
+        # ---------------------------------------------------------
         required_question_ids = set()
+
         for q_id, p_ans in peer_answers.items():
             if q_id in self_answers:
                 s_ans = self_answers[q_id]
+
                 if p_ans.score is not None and s_ans.score is not None:
                     if abs(p_ans.score - s_ans.score) >= 2:
                         required_question_ids.add(q_id)
 
-        # Check if current user has already completed all required score check justifications
-        current_user_answers = {ans.question_id: ans for ans in evaluation.answers.all()}
+        # ---------------------------------------------------------
+        # Check current user's completed justifications
+        # ---------------------------------------------------------
+        current_user_answers = {
+            ans.question_id: ans for ans in evaluation.answers.all()
+        }
+
         current_user_missing_count = 0
+
         for q_id in required_question_ids:
             ans = current_user_answers.get(q_id)
+
             if not ans or not ans.justification or not ans.justification.strip():
                 current_user_missing_count += 1
 
+        # ---------------------------------------------------------
+        # Already completed
+        # ---------------------------------------------------------
         if current_user_missing_count == 0 and len(required_question_ids) > 0:
             return Response(
-                {"detail": "Score check justifications have already been completed for this evaluation."},
+                {
+                    "detail": (
+                        "Score check justifications have "
+                        "already been completed for this evaluation."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ---------------------------------------------------------
+        # Validate request
+        # ---------------------------------------------------------
         serializer = ScoreCheckSerializer(data=request.data)
+
         serializer.is_valid(raise_exception=True)
 
         justifications_input = serializer.validated_data["justifications"]
 
-        # Validate submitted question_ids and non-empty justifications
+        # ---------------------------------------------------------
+        # Validate question IDs
+        # ---------------------------------------------------------
         for item in justifications_input:
             q_id = item["question_id"]
+
             just = item["justification"]
+
             if q_id not in required_question_ids:
                 return Response(
-                    {"detail": f"Question {q_id} does not require score check justification."},
+                    {
+                        "detail": (
+                            f"Question {q_id} does not require "
+                            "score check justification."
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
             if not just or not just.strip():
                 return Response(
-                    {"detail": f"Justification for question {q_id} cannot be empty."},
+                    {"detail": (f"Justification for question {q_id} cannot be empty.")},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # Save justifications into existing Answer.justification
+        # ---------------------------------------------------------
+        # Save justifications
+        # ---------------------------------------------------------
         for item in justifications_input:
             q_id = item["question_id"]
+
             just = item["justification"].strip()
-            answer = Answer.objects.filter(evaluation=evaluation, question_id=q_id).first()
+
+            answer = Answer.objects.filter(
+                evaluation=evaluation,
+                question_id=q_id,
+            ).first()
+
             if answer:
                 answer.justification = just
-                answer.save(update_fields=["justification", "updated_at"])
 
-        # Re-fetch evaluation answers to compute remaining_count accurately
+                answer.save(
+                    update_fields=[
+                        "justification",
+                        "updated_at",
+                    ]
+                )
+
+        # ---------------------------------------------------------
+        # Refresh evaluation
+        # ---------------------------------------------------------
         evaluation.refresh_from_db()
+
         current_answers = {ans.question_id: ans for ans in evaluation.answers.all()}
 
+        # ---------------------------------------------------------
+        # Remaining count
+        # ---------------------------------------------------------
         remaining_count = 0
+
         for q_id in required_question_ids:
             ans = current_answers.get(q_id)
+
             if not ans or not ans.justification or not ans.justification.strip():
                 remaining_count += 1
 
-        # Check if counterpart has any pending score check work
+        # ---------------------------------------------------------
+        # Check counterpart
+        # ---------------------------------------------------------
         counterpart_pending = False
+
         comp_answers = {ans.question_id: ans for ans in comp_eval.answers.all()}
+
         for q_id in required_question_ids:
             ans = comp_answers.get(q_id)
+
             if not ans or not ans.justification or not ans.justification.strip():
                 counterpart_pending = True
                 break
 
+        # ---------------------------------------------------------
+        # Both completed → lock both
+        # ---------------------------------------------------------
         if remaining_count == 0 and not counterpart_pending:
             evaluation.status = Evaluation.STATUS_LOCKED
-            evaluation.save(update_fields=["status", "updated_at"])
+
+            evaluation.save(
+                update_fields=[
+                    "status",
+                    "updated_at",
+                ]
+            )
+
             comp_eval.status = Evaluation.STATUS_LOCKED
-            comp_eval.save(update_fields=["status", "updated_at"])
+
+            comp_eval.save(
+                update_fields=[
+                    "status",
+                    "updated_at",
+                ]
+            )
 
             return Response(
                 {
                     "id": evaluation.id,
-                    "status": Evaluation.STATUS_LOCKED,
-                    "counterpart_status": Evaluation.STATUS_LOCKED,
+                    "status": (Evaluation.STATUS_LOCKED),
+                    "counterpart_status": (Evaluation.STATUS_LOCKED),
                     "remaining_count": 0,
                 },
                 status=status.HTTP_200_OK,
             )
 
+        # ---------------------------------------------------------
+        # Current user completed, counterpart still pending
+        # ---------------------------------------------------------
         return Response(
             {
                 "id": evaluation.id,
-                "status": Evaluation.STATUS_DIFF_REVIEW,
+                "status": (Evaluation.STATUS_DIFF_REVIEW),
                 "remaining_count": remaining_count,
             },
             status=status.HTTP_200_OK,
