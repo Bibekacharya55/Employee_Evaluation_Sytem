@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from apps.accounts.models import User
 from apps.evaluations.models import Evaluation, EvaluationCycle, PeerAssignment
 from apps.evaluations.serializers import EvaluationDetailSerializer
-
+from django.db.models import Q
 from .models import FinalReview
 from .permissions import IsManager
 from .serializers import (
@@ -88,6 +88,17 @@ class ManagerDashboardView(APIView):
         else:
             employees = User.objects.filter(is_active=True).order_by("id")
 
+        search = request.query_params.get("search", "").strip()
+
+        if search:
+            employees = employees.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(email__icontains=search)
+                | Q(designation__icontains=search)
+                | Q(role__icontains=search)
+    )
+        
         results = []
 
         # Metric counters for the top summary cards
@@ -130,6 +141,38 @@ class ManagerDashboardView(APIView):
                 table_status = "To Do"
                 todo_count += 1
 
+            status_filter = (
+                request.query_params.get("status")
+                or request.query_params.get("filter")
+                or ""
+            )
+
+            status_filter = (
+                status_filter
+                .strip()
+                .lower()
+                .replace("-", "_")
+                .replace(" ", "_")
+            )
+
+            status_map = {
+                "all": None,
+
+                "completed": "Submitted",
+                "submitted": "Submitted",
+
+                "in_progress": "In Progress",
+
+                "todo": "To Do",
+                "to_do": "To Do",
+            }
+
+            wanted_status = status_map.get(status_filter)
+
+            if status_filter and status_filter != "all":
+                if wanted_status and table_status != wanted_status:
+                    continue
+
             evaluator_name = None
             if peer_evaluations and peer_evaluations[0].evaluator:
                 evaluator_name = f"{peer_evaluations[0].evaluator.first_name} {peer_evaluations[0].evaluator.last_name}".strip()
@@ -142,9 +185,17 @@ class ManagerDashboardView(APIView):
             elif self_evaluation and getattr(self_evaluation, "updated_at", None):
                 review_date = self_evaluation.updated_at.strftime("%d %B, %Y")
 
-            overall_score = (
-                getattr(final_review, "final_score", None) if final_review else None
-            )
+            peer_answers = []
+            for peer_evaluation in peer_evaluations:
+                peer_answers.extend(
+                    peer_evaluation.answers.all()
+                )
+            if peer_answers:
+                overall_score = round(
+                    sum(ans.score for ans in peer_answers) / len(peer_answers), 2
+                )
+            else:
+                overall_score = None
             designation = getattr(employee, "role", None) or getattr(
                 employee, "designation", "Developer"
             )
@@ -306,21 +357,25 @@ class ManagerEmployeeReviewView(APIView):
         )
 
         return Response(
-            {
-                "evaluatee": {
-                    "id": employee.id,
-                    "first_name": employee.first_name or "",
-                    "last_name": employee.last_name or "",
-                    "designation": evaluatee_designation,
-                },
-                "evaluator": evaluator_info,  # <--- Evaluator object matching evaluatee shape
-                "overall_score": getattr(peer_eval, "overall_score", 4.2),
-                "submitted_on": peer_eval.updated_at.strftime("%d %B, %Y")
-                if (peer_eval and peer_eval.updated_at)
-                else None,
-                "categories": categories_list,
-            }
-        )
+    {
+        "evaluatee": {
+            "id": employee.id,
+            "first_name": employee.first_name or "",
+            "last_name": employee.last_name or "",
+            "designation": evaluatee_designation,
+        },
+        "evaluator": evaluator_info,
+        "overall_score": round(
+            sum(ans.score for ans in peer_answers_map.values())
+            / len(peer_answers_map),
+            2
+        ) if peer_answers_map else 0.0,
+        "submitted_on": peer_eval.updated_at.strftime("%d %B, %Y")
+        if (peer_eval and peer_eval.updated_at)
+        else None,
+        "categories": categories_list,
+    }
+)
 
 
 class FinalReviewCreateView(APIView):
