@@ -13,93 +13,6 @@ from .serializers import (
     ReportListSerializer,
 )
 
-
-class ReportExportView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        cycle_id = request.query_params.get("cycle_id")
-        file_format = request.query_params.get("format")
-
-        if file_format != "csv":
-            return Response(
-                {"detail": "Only CSV format is supported."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not cycle_id:
-            return Response(
-                {"detail": "cycle_id is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            cycle_id_int = int(cycle_id)
-            if not EvaluationCycle.objects.filter(id=cycle_id_int).exists():
-                return Response(
-                    {"detail": "Evaluation cycle not found."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-        except ValueError:
-            return Response(
-                {"detail": "Invalid cycle_id format."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        evaluations = Evaluation.objects.filter(
-            cycle_id=cycle_id_int
-        ).select_related(
-            "evaluator",
-            "evaluatee",
-        ).prefetch_related(
-            "answers__question__category"
-        )
-
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="evaluation_report.csv"'
-
-        writer = csv.writer(response)
-
-        writer.writerow([
-            "employee",
-            "evaluator",
-            "evaluation_type",
-            "category",
-            "question",
-            "score",
-            "justification",
-            "status",
-            "submitted_at",
-            "created_at",
-            "updated_at",
-        ])
-
-        for evaluation in evaluations:
-            employee_name = f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}".strip()
-            evaluator_name = f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}".strip()
-
-            for answer in evaluation.answers.all():
-                submitted_at_str = evaluation.submitted_at.isoformat() if evaluation.submitted_at else ""
-                created_at_str = evaluation.created_at.isoformat() if evaluation.created_at else ""
-                updated_at_str = evaluation.updated_at.isoformat() if evaluation.updated_at else ""
-
-                writer.writerow([
-                    employee_name,
-                    evaluator_name,
-                    evaluation.evaluation_type,
-                    answer.question.category.name,
-                    answer.question.text,
-                    answer.score,
-                    answer.justification or "",
-                    evaluation.status,
-                    submitted_at_str,
-                    created_at_str,
-                    updated_at_str,
-                ])
-
-        return response
-
-
 class ReportListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -114,23 +27,27 @@ class ReportListView(APIView):
 
         try:
             cycle_id_int = int(cycle_id)
+
             if not EvaluationCycle.objects.filter(id=cycle_id_int).exists():
                 return Response(
                     {"detail": "Evaluation cycle not found."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
+
         except ValueError:
             return Response(
                 {"detail": "Invalid cycle_id format."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        evaluations = Evaluation.objects.filter(
-            cycle_id=cycle_id_int
-        ).select_related(
-            "evaluator",
-            "evaluatee",
-        ).prefetch_related("answers")
+        evaluations = (
+            Evaluation.objects.filter(cycle_id=cycle_id_int)
+            .select_related(
+                "evaluator",
+                "evaluatee",
+            )
+            .prefetch_related("answers")
+        )
 
         reports = []
 
@@ -139,23 +56,149 @@ class ReportListView(APIView):
 
             if answers.exists():
                 total_score = sum(answer.score for answer in answers)
-                overall_score = round(total_score / answers.count(), 2)
+
+                overall_score = round(
+                    total_score / answers.count(),
+                    2,
+                )
+
             else:
                 overall_score = 0.0
 
-            employee_name = f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}".strip()
-            evaluator_name = f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}".strip()
+            employee_name = (
+                f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}"
+            ).strip()
 
-            reports.append({
-                "evaluation_id": evaluation.id,
-                "employee": employee_name,
-                "evaluating": evaluator_name,
-                "status": evaluation.status,
-                "overall_score": overall_score,
-            })
+            evaluator_name = (
+                f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}"
+            ).strip()
 
-        serializer = ReportListSerializer(reports, many=True)
-        return Response(serializer.data)
+            reports.append(
+                {
+                    "evaluation_id": evaluation.id,
+                    "employee": employee_name,
+                    "evaluating": evaluator_name,
+                    "status": evaluation.status,
+                    "overall_score": overall_score,
+                }
+            )
+
+        serializer = ReportListSerializer(
+            reports,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReportExportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        cycle_id = request.query_params.get("cycle_id")
+        file_format = request.query_params.get("file_format")
+
+        if not cycle_id:
+            return Response(
+                {"detail": "cycle_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if file_format != "csv":
+            return Response(
+                {"detail": "Only CSV format is supported."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            cycle_id_int = int(cycle_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Invalid cycle_id format."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not EvaluationCycle.objects.filter(id=cycle_id_int).exists():
+            return Response(
+                {"detail": "Evaluation cycle not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        evaluations = (
+            Evaluation.objects.filter(cycle_id=cycle_id_int)
+            .select_related(
+                "evaluator",
+                "evaluatee",
+            )
+            .prefetch_related("answers__question__category")
+        )
+
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+
+        response["Content-Disposition"] = (
+            f'attachment; filename="evaluation_report_cycle_{cycle_id_int}.csv"'
+        )
+
+        writer = csv.writer(response)
+
+        writer.writerow(
+            [
+                "employee",
+                "evaluator",
+                "evaluation_type",
+                "category",
+                "question",
+                "score",
+                "justification",
+                "status",
+                "submitted_at",
+                "created_at",
+                "updated_at",
+            ]
+        )
+
+        for evaluation in evaluations:
+            employee_name = (
+                f"{evaluation.evaluatee.first_name} {evaluation.evaluatee.last_name}"
+            ).strip()
+
+            evaluator_name = (
+                f"{evaluation.evaluator.first_name} {evaluation.evaluator.last_name}"
+            ).strip()
+
+            submitted_at = (
+                evaluation.submitted_at.isoformat() if evaluation.submitted_at else ""
+            )
+
+            created_at = (
+                evaluation.created_at.isoformat() if evaluation.created_at else ""
+            )
+
+            updated_at = (
+                evaluation.updated_at.isoformat() if evaluation.updated_at else ""
+            )
+
+            for answer in evaluation.answers.all():
+                writer.writerow(
+                    [
+                        employee_name,
+                        evaluator_name,
+                        evaluation.evaluation_type,
+                        answer.question.category.name,
+                        answer.question.text,
+                        answer.score,
+                        answer.justification or "",
+                        evaluation.status,
+                        submitted_at,
+                        created_at,
+                        updated_at,
+                    ]
+                )
+
+        return response
 
 
 class ReportDetailView(APIView):
