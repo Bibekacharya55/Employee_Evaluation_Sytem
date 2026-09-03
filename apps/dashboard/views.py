@@ -110,12 +110,12 @@ class DashboardView(APIView):
         in_progress_statuses = [
             Evaluation.STATUS_NOT_STARTED,
             Evaluation.STATUS_DRAFT,
+            Evaluation.STATUS_DIFF_REVIEW,
+            Evaluation.STATUS_DIFF_REVIEW_2,
         ]
 
         completed_statuses = [
             Evaluation.STATUS_SUBMITTED,
-            Evaluation.STATUS_DIFF_REVIEW,
-            Evaluation.STATUS_DIFF_REVIEW_2,
             Evaluation.STATUS_LOCKED,
         ]
 
@@ -127,8 +127,8 @@ class DashboardView(APIView):
             status__in=in_progress_statuses
         ).count()
 
-        submitted = evaluations.filter(
-            status=Evaluation.STATUS_SUBMITTED
+        completed_count = evaluations.filter(
+            status__in=completed_statuses
         ).count()
 
         # ---------------------------------------
@@ -231,7 +231,7 @@ class DashboardView(APIView):
 
             "counts": {
                 "in_progress": in_progress,
-                "submitted": submitted,
+                "completed": completed_count
             },
 
             "to_do": to_do,

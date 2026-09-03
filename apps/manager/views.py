@@ -129,9 +129,12 @@ class ManagerDashboardView(APIView):
             )
 
             # Determine status string matching UI badges (Submitted, To Do, In Progress)
-            if final_review or (
-                self_evaluation and self_evaluation.status == Evaluation.STATUS_LOCKED
-            ):
+            completed_statuses = [
+                Evaluation.STATUS_SUBMITTED,
+                Evaluation.STATUS_LOCKED,
+            ]
+
+            if final_review or (self_evaluation and self_evaluation.status in completed_statuses):
                 table_status = "Submitted"
                 completed_count += 1
             elif self_evaluation:
